@@ -4,10 +4,13 @@ from pathlib import Path
 from ..plugin_system.loader import PluginLoader
 from ..core.node_registry import node_registry
 from ..storage.mission_store import mission_store
+from ..core.failsafe_manager import failsafe_manager
+from .routes.safety import router as safety_router
 from .routes.nodes import router as nodes_router
 from .routes.commands import router as commands_router
 from .routes.missions import router as missions_router
 from .routes.execution import router as execution_router
+from .routes.operations import router as operations_router
 from .websocket_server import (
     telemetry_websocket_handler,
     events_websocket_handler
@@ -39,6 +42,8 @@ def create_app() -> FastAPI:
     app.include_router(commands_router)
     app.include_router(missions_router)
     app.include_router(execution_router)
+    app.include_router(safety_router)
+    app.include_router(operations_router)
 
     # WebSocket routes
     @app.websocket("/ws/telemetry")
@@ -53,21 +58,22 @@ def create_app() -> FastAPI:
     async def startup():
         logger.info("Henosync backend starting...")
 
-        # Load plugins
         loader = PluginLoader(PLUGINS_DIR)
         count = loader.load_all()
         logger.info(f"Plugin loading complete — {count} plugins loaded")
 
-        # Initialize storage
         await mission_store.initialize()
-
-        # Initialize node registry
         await node_registry.initialize()
         logger.info("Node registry ready")
+
+        # Start failsafe manager last
+        await failsafe_manager.start()
+        logger.info("Failsafe manager running")
 
     @app.on_event("shutdown")
     async def shutdown():
         logger.info("Henosync backend shutting down...")
+        await failsafe_manager.stop()
         await node_registry.shutdown()
 
     @app.get("/health")
